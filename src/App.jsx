@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
+import { startAudio, startMusic, stopMusic, sfx, toggleMute, isMuted } from './audio';
 
 // ═══════════════════════════════════════════════════════════════
 //  ELEVATOR ACTION - Web Edition
@@ -108,9 +109,15 @@ export default function App() {
   // Keyboard handling
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyE', 'KeyD', 'Escape'].includes(e.code)) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyE', 'KeyD', 'KeyM', 'Escape'].includes(e.code)) {
         e.preventDefault();
         keysRef.current.add(e.code);
+
+        // Mute toggle (immediate)
+        if (e.code === 'KeyM') {
+          toggleMute();
+          forceUpdate(n => n + 1);
+        }
       }
     };
     const handleKeyUp = (e) => {
@@ -131,6 +138,10 @@ export default function App() {
 
     if (s.mode === GAME.TITLE && keys.has('Space')) {
       keys.delete('Space');
+      startAudio().then(() => {
+        sfx.start();
+        startMusic();
+      });
       setState({ mode: GAME.PLAY });
       return;
     }
@@ -138,6 +149,8 @@ export default function App() {
     if ((s.mode === GAME.OVER || s.mode === GAME.WIN) && keys.has('Space')) {
       keys.delete('Space');
       stateRef.current = initState();
+      startMusic();
+      sfx.start();
       setState({ mode: GAME.PLAY });
       return;
     }
@@ -152,6 +165,7 @@ export default function App() {
       keys.delete('KeyE');
       n.inElev = -1;
       n.px = level.elevatorX[s.inElev] + 4;
+      sfx.elevator();
       setState(n);
       return;
     }
@@ -160,12 +174,18 @@ export default function App() {
     if (keys.has('KeyD')) {
       keys.delete('KeyD');
       n.duck = !s.duck;
+      if (n.duck) {
+        sfx.duck();
+      } else {
+        sfx.unduck();
+      }
     }
 
     // Shoot (one-shot)
     if (keys.has('Space') && !s.duck && s.inElev < 0) {
       keys.delete('Space');
       n.bullets = [...s.bullets, { x: s.px, floor: s.pf, dir: s.pdir, enemy: false }];
+      sfx.shoot();
     }
 
     // Enter elevator (one-shot)
@@ -175,6 +195,7 @@ export default function App() {
       if (ei >= 0) {
         n.inElev = ei;
         n.px = level.elevatorX[ei] + 1;
+        sfx.elevator();
       }
     }
 
@@ -196,29 +217,45 @@ export default function App() {
       if (keys.has('ArrowUp') && ef > 0) {
         n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f - 1 : f);
         n.pf = ef - 1;
+        sfx.elevator();
       }
       if (keys.has('ArrowDown') && ef < FLOORS - 1) {
         n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f + 1 : f);
         n.pf = ef + 1;
+        sfx.elevator();
       }
     } else {
       // Walking (throttled)
+      let moved = false;
       if (keys.has('ArrowLeft') && !s.duck) {
         n.px = Math.max(2, s.px - 2);
         n.pdir = -1;
+        moved = true;
       }
       if (keys.has('ArrowRight') && !s.duck) {
         n.px = Math.min(WIDTH - 2, s.px + 2);
         n.pdir = 1;
+        moved = true;
+      }
+      // Footstep sound every other tick when walking
+      if (moved && n.tick % 2 === 0) {
+        sfx.footstep();
       }
 
       // Collect docs
+      const docsBeforeCount = n.docs.filter(d => d).length;
       level.redDoors.forEach((d, i) => {
         if (!n.docs[i] && d.floor === n.pf && Math.abs(d.x - n.px) < 3) {
           n.docs = n.docs.map((v, j) => j === i ? true : v);
           n.score += 500;
+          sfx.collectDoc();
         }
       });
+      // Check if all docs now collected
+      const docsAfterCount = n.docs.filter(d => d).length;
+      if (docsAfterCount === n.docs.length && docsBeforeCount < n.docs.length) {
+        sfx.allDocsCollected();
+      }
     }
 
     // Move bullets
@@ -233,11 +270,17 @@ export default function App() {
         if (hit >= 0) {
           n.enemies = n.enemies.filter((_, i) => i !== hit);
           n.score += 100;
+          sfx.enemyHit();
           return false;
         }
       } else if (b.floor === s.pf && Math.abs(b.x - s.px) < 2 && !s.duck && s.inElev < 0) {
         n.lives = s.lives - 1;
-        if (n.lives <= 0) n.mode = GAME.OVER;
+        sfx.playerHit();
+        if (n.lives <= 0) {
+          n.mode = GAME.OVER;
+          stopMusic();
+          sfx.gameOver();
+        }
         return false;
       }
       return true;
@@ -250,6 +293,7 @@ export default function App() {
         ne.dir = s.px > e.x ? 1 : -1;
         if (Math.random() < 0.02) {
           n.bullets.push({ x: e.x, floor: e.floor, dir: ne.dir, enemy: true });
+          sfx.enemyShoot();
         }
       }
       if (Math.random() < 0.2) {
@@ -262,12 +306,15 @@ export default function App() {
     if (Math.random() < 0.01 && n.enemies.length < 4) {
       const bd = s.level.blueDoors[Math.floor(Math.random() * s.level.blueDoors.length)];
       n.enemies.push({ x: bd.x, floor: bd.floor, dir: Math.random() > 0.5 ? 1 : -1 });
+      sfx.enemySpawn();
     }
 
     // Win check - must reach exit door on floor 0
     if (n.docs.every(d => d) && s.pf === 0 && Math.abs(n.px - level.exitX) < 4) {
       n.mode = GAME.WIN;
       n.score += 5000;
+      stopMusic();
+      sfx.win();
     }
 
     setState(n);
@@ -328,27 +375,49 @@ export default function App() {
       }
     });
 
-    // Draw red doors (documents)
+    // Draw red doors (documents) with emoji
+    const emojiSize = Math.max(16, CELL_H * 0.7);
     level.redDoors.forEach((d, i) => {
       const x = d.x * CELL_W;
       const y = d.floor * CELL_H;
-      ctx.fillStyle = docs[i] ? COLORS.redDoorCollected : COLORS.redDoor;
+
+      // Door background
+      ctx.fillStyle = docs[i] ? '#222' : '#442200';
       ctx.fillRect(x, y + 4, CELL_W * 2, CELL_H - 8);
 
-      // Door frame
+      // Emoji
+      ctx.font = `${emojiSize}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(docs[i] ? '✅' : '📁', x + CELL_W, y + CELL_H / 2);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+
+      // Glow effect for uncollected
       if (!docs[i]) {
-        ctx.strokeStyle = '#ff8800';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x + 1, y + 5, CELL_W * 2 - 2, CELL_H - 10);
+        ctx.shadowColor = '#ff6600';
+        ctx.shadowBlur = 10;
+        ctx.fillRect(x, y + 4, 0, 0); // trigger shadow
+        ctx.shadowBlur = 0;
       }
     });
 
-    // Draw blue doors (spawn points)
+    // Draw blue doors (spawn points) with emoji
     level.blueDoors.forEach(d => {
       const x = d.x * CELL_W;
       const y = d.floor * CELL_H;
-      ctx.fillStyle = COLORS.blueDoor;
+
+      // Door background
+      ctx.fillStyle = '#223344';
       ctx.fillRect(x, y + 4, CELL_W * 2, CELL_H - 8);
+
+      // Emoji
+      ctx.font = `${emojiSize}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚪', x + CELL_W, y + CELL_H / 2);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
     });
 
     // Draw exit door on floor 0
@@ -363,13 +432,17 @@ export default function App() {
       ctx.fillRect(exitX - 4, exitY, CELL_W * 2 + 8, CELL_H);
     }
 
-    ctx.fillStyle = allDocsCollected ? '#00ff00' : '#336633';
+    // Door background
+    ctx.fillStyle = allDocsCollected ? '#005500' : '#222';
     ctx.fillRect(exitX, exitY + 4, CELL_W * 2, CELL_H - 8);
 
-    // EXIT text
-    ctx.fillStyle = allDocsCollected ? '#000000' : '#224422';
-    ctx.font = `bold ${Math.max(10, CELL_H / 3)}px monospace`;
-    ctx.fillText('EXIT', exitX + 4, exitY + CELL_H / 2 + 4);
+    // Exit emoji
+    ctx.font = `${emojiSize}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(allDocsCollected ? '🚀' : '🔒', exitX + CELL_W, exitY + CELL_H / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
 
     // Draw enemies
     enemies.forEach(e => {
@@ -463,9 +536,10 @@ export default function App() {
             <span className="hud-item hud-lives">{'❤️'.repeat(s.lives)}{'🖤'.repeat(3 - s.lives)}</span>
             <span className="hud-item hud-docs">📁 {collected}/{s.docs.length}</span>
             <span className="hud-item hud-floor">🏢 FL{FLOORS - s.pf}</span>
+            <span className="hud-item hud-sound">{isMuted() ? '🔇' : '🔊'}</span>
           </div>
           <div className="controls-hint">
-            ⬅️➡️ Move | ⬆️⬇️ Elevator | 🔑E Enter/Exit | 🔫SPACE Shoot | 🦆D Duck
+            ⬅️➡️ Move | ⬆️⬇️ Elevator | 🔑E Enter/Exit | 🔫SPACE Shoot | 🦆D Duck | 🔊M Mute
           </div>
         </>
       )}

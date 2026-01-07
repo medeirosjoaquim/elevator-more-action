@@ -168,6 +168,7 @@
 .hud-lives { color: #ff4444; }
 .hud-docs { color: #00ff00; }
 .hud-floor { color: #4488ff; }
+.hud-sound { color: #888; cursor: pointer; }
 
 /* Controls hint */
 .controls-hint {
