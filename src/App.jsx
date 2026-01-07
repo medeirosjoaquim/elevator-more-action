@@ -12,7 +12,7 @@ const BASE_CELL_W = 16;
 const BASE_CELL_H = 32;
 const ASPECT_RATIO = (WIDTH * BASE_CELL_W) / (FLOORS * BASE_CELL_H);
 
-const GAME = { TITLE: 0, PLAY: 1, OVER: 2, WIN: 3 };
+const GAME = { TITLE: 0, PLAY: 1, OVER: 2, WIN: 3, LEVEL_COMPLETE: 4 };
 
 const COLORS = {
   bg: '#0a0a0a',
@@ -32,31 +32,106 @@ const COLORS = {
   text: '#00ff00',
 };
 
-const createLevel = () => ({
-  redDoors: [
-    { floor: 1, x: 25 }, { floor: 2, x: 10 }, { floor: 3, x: 40 },
-    { floor: 4, x: 12 }, { floor: 5, x: 35 }, { floor: 6, x: 25 },
-    { floor: 7, x: 42 }, { floor: 8, x: 10 }
-  ],
-  blueDoors: [
-    { floor: 2, x: 38 }, { floor: 3, x: 30 }, { floor: 5, x: 15 },
-    { floor: 6, x: 38 }, { floor: 8, x: 40 }
-  ],
-  elevatorX: [15, 35],
-  exitX: 25 // Exit door position on floor 0 (center)
-});
+// 5 Levels with increasing difficulty and elevator restrictions
+const LEVELS = [
+  // Level 1 - Tutorial (2 elevators, 4 docs)
+  {
+    redDoors: [
+      { floor: 2, x: 10 }, { floor: 4, x: 38 },
+      { floor: 6, x: 12 }, { floor: 8, x: 35 }
+    ],
+    blueDoors: [
+      { floor: 3, x: 30 }, { floor: 5, x: 40 }, { floor: 7, x: 8 }
+    ],
+    elevators: [
+      { x: 15, minFloor: 0, maxFloor: 9, color: '#00ff00' },  // green - full
+      { x: 35, minFloor: 0, maxFloor: 5, color: '#4488ff' }   // blue - lower only
+    ],
+    exitX: 25
+  },
+  // Level 2 - Introduction (2 elevators, 5 docs)
+  {
+    redDoors: [
+      { floor: 1, x: 40 }, { floor: 3, x: 10 }, { floor: 5, x: 42 },
+      { floor: 7, x: 8 }, { floor: 8, x: 38 }
+    ],
+    blueDoors: [
+      { floor: 2, x: 25 }, { floor: 4, x: 32 }, { floor: 6, x: 15 }
+    ],
+    elevators: [
+      { x: 12, minFloor: 4, maxFloor: 9, color: '#00ff00' },  // green - upper
+      { x: 38, minFloor: 0, maxFloor: 6, color: '#4488ff' }   // blue - lower
+    ],
+    exitX: 25
+  },
+  // Level 3 - Challenge (3 elevators, 6 docs)
+  {
+    redDoors: [
+      { floor: 1, x: 8 }, { floor: 2, x: 42 }, { floor: 4, x: 12 },
+      { floor: 5, x: 38 }, { floor: 7, x: 25 }, { floor: 8, x: 10 }
+    ],
+    blueDoors: [
+      { floor: 3, x: 20 }, { floor: 5, x: 8 }, { floor: 6, x: 40 }, { floor: 8, x: 30 }
+    ],
+    elevators: [
+      { x: 8, minFloor: 0, maxFloor: 4, color: '#00ff00' },   // green - bottom
+      { x: 24, minFloor: 3, maxFloor: 7, color: '#4488ff' },  // blue - middle
+      { x: 40, minFloor: 5, maxFloor: 9, color: '#ffaa00' }   // orange - top
+    ],
+    exitX: 20
+  },
+  // Level 4 - Expert (3 elevators, 7 docs)
+  {
+    redDoors: [
+      { floor: 1, x: 12 }, { floor: 2, x: 38 }, { floor: 3, x: 8 },
+      { floor: 5, x: 42 }, { floor: 6, x: 15 }, { floor: 7, x: 35 },
+      { floor: 8, x: 25 }
+    ],
+    blueDoors: [
+      { floor: 2, x: 20 }, { floor: 4, x: 30 }, { floor: 5, x: 10 },
+      { floor: 7, x: 42 }, { floor: 8, x: 8 }
+    ],
+    elevators: [
+      { x: 10, minFloor: 0, maxFloor: 3, color: '#00ff00' },  // green - floor 0-3
+      { x: 25, minFloor: 2, maxFloor: 6, color: '#4488ff' },  // blue - floor 2-6
+      { x: 42, minFloor: 4, maxFloor: 9, color: '#ffaa00' }   // orange - floor 4-9
+    ],
+    exitX: 8
+  },
+  // Level 5 - Master (3 elevators, 8 docs)
+  {
+    redDoors: [
+      { floor: 1, x: 10 }, { floor: 2, x: 42 }, { floor: 3, x: 20 },
+      { floor: 4, x: 8 }, { floor: 5, x: 38 }, { floor: 6, x: 12 },
+      { floor: 7, x: 35 }, { floor: 8, x: 25 }
+    ],
+    blueDoors: [
+      { floor: 1, x: 30 }, { floor: 3, x: 40 }, { floor: 4, x: 18 },
+      { floor: 6, x: 42 }, { floor: 7, x: 8 }, { floor: 9, x: 35 }
+    ],
+    elevators: [
+      { x: 8, minFloor: 0, maxFloor: 2, color: '#00ff00' },   // green - 0-2
+      { x: 25, minFloor: 1, maxFloor: 5, color: '#4488ff' },  // blue - 1-5
+      { x: 42, minFloor: 3, maxFloor: 9, color: '#ffaa00' }   // orange - 3-9
+    ],
+    exitX: 5
+  }
+];
 
-const initState = () => {
-  const level = createLevel();
+const getLevel = (levelNum) => LEVELS[Math.min(levelNum - 1, LEVELS.length - 1)];
+
+const initState = (levelNum = 1, preserveScore = 0, preserveLives = 3) => {
+  const level = getLevel(levelNum);
   return {
     mode: GAME.TITLE,
+    currentLevel: levelNum,
     px: 25, pf: 9, pdir: 1, duck: false, inElev: -1,
-    elevFloor: [9, 0],
+    elevFloor: level.elevators.map(e => e.maxFloor), // Start at top of each elevator's range
     enemies: [],
     bullets: [],
-    explosions: [], // Visual explosion effects
+    explosions: [],
     docs: level.redDoors.map(() => false),
-    score: 0, lives: 3, tick: 0,
+    score: preserveScore, lives: preserveLives, tick: 0,
     level
   };
 };
@@ -156,6 +231,16 @@ export default function App() {
       return;
     }
 
+    // Level complete - advance to next level
+    if (s.mode === GAME.LEVEL_COMPLETE && keys.has('Space')) {
+      keys.delete('Space');
+      const nextLevel = s.currentLevel + 1;
+      stateRef.current = initState(nextLevel, s.score, s.lives);
+      sfx.start();
+      setState({ mode: GAME.PLAY });
+      return;
+    }
+
     if (s.mode !== GAME.PLAY) return;
 
     const { level, elevFloor } = s;
@@ -165,7 +250,7 @@ export default function App() {
     if (s.inElev >= 0 && keys.has('KeyE')) {
       keys.delete('KeyE');
       n.inElev = -1;
-      n.px = level.elevatorX[s.inElev] + 4;
+      n.px = level.elevators[s.inElev].x + 4;
       sfx.elevator();
       setState(n);
       return;
@@ -192,10 +277,10 @@ export default function App() {
     // Enter elevator (one-shot)
     if (keys.has('KeyE') && s.inElev < 0) {
       keys.delete('KeyE');
-      const ei = level.elevatorX.findIndex((ex, i) => elevFloor[i] === s.pf && Math.abs(ex - s.px) < 5);
+      const ei = level.elevators.findIndex((elev, i) => elevFloor[i] === s.pf && Math.abs(elev.x - s.px) < 5);
       if (ei >= 0) {
         n.inElev = ei;
-        n.px = level.elevatorX[ei] + 1;
+        n.px = level.elevators[ei].x + 1;
         sfx.elevator();
       }
     }
@@ -217,18 +302,29 @@ export default function App() {
       .map(exp => ({ ...exp, life: exp.life - 1 }))
       .filter(exp => exp.life > 0);
 
-    // Elevator movement (throttled)
+    // Elevator movement (throttled) - with floor restrictions
     if (s.inElev >= 0) {
+      const elev = level.elevators[s.inElev];
       const ef = elevFloor[s.inElev];
-      if (keys.has('ArrowUp') && ef > 0) {
-        n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f - 1 : f);
-        n.pf = ef - 1;
-        sfx.elevator();
+      if (keys.has('ArrowUp')) {
+        if (ef > elev.minFloor) {
+          n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f - 1 : f);
+          n.pf = ef - 1;
+          sfx.elevator();
+        } else {
+          // At top of elevator's range - play denied sound
+          sfx.elevatorDenied();
+        }
       }
-      if (keys.has('ArrowDown') && ef < FLOORS - 1) {
-        n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f + 1 : f);
-        n.pf = ef + 1;
-        sfx.elevator();
+      if (keys.has('ArrowDown')) {
+        if (ef < elev.maxFloor) {
+          n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f + 1 : f);
+          n.pf = ef + 1;
+          sfx.elevator();
+        } else {
+          // At bottom of elevator's range - play denied sound
+          sfx.elevatorDenied();
+        }
       }
     } else {
       // Walking (throttled)
@@ -340,12 +436,20 @@ export default function App() {
       sfx.enemySpawn();
     }
 
-    // Win check - must reach exit door on floor 0
+    // Level complete / Win check - must reach exit door on floor 0
     if (n.docs.every(d => d) && s.pf === 0 && Math.abs(n.px - level.exitX) < 4) {
-      n.mode = GAME.WIN;
-      n.score += 5000;
-      stopMusic();
-      sfx.win();
+      if (s.currentLevel >= LEVELS.length) {
+        // Completed all levels - final win!
+        n.mode = GAME.WIN;
+        n.score += 5000;
+        stopMusic();
+        sfx.win();
+      } else {
+        // Level complete - go to next level
+        n.mode = GAME.LEVEL_COMPLETE;
+        n.score += 2000;
+        sfx.levelComplete();
+      }
     }
 
     setState(n);
@@ -377,25 +481,42 @@ export default function App() {
       ctx.fillRect(0, y + CELL_H - 2, CANVAS_W, 2);
     }
 
-    // Draw elevator shafts
-    level.elevatorX.forEach((ex, ei) => {
+    // Draw elevator shafts with color-coded floor restrictions
+    level.elevators.forEach((elev, ei) => {
+      const ex = elev.x;
       for (let f = 0; f < FLOORS; f++) {
         const x = ex * CELL_W;
         const y = f * CELL_H;
 
-        // Shaft
-        ctx.fillStyle = COLORS.elevatorShaft;
+        // Shaft - darker if out of range
+        const inRange = f >= elev.minFloor && f <= elev.maxFloor;
+        ctx.fillStyle = inRange ? COLORS.elevatorShaft : '#0a0a0a';
         ctx.fillRect(x, y, CELL_W * 3, CELL_H);
 
-        // Shaft lines
-        ctx.fillStyle = COLORS.elevator;
+        // Shaft lines - colored when in range
+        ctx.fillStyle = inRange ? elev.color : '#111';
         ctx.fillRect(x, y, 2, CELL_H);
         ctx.fillRect(x + CELL_W * 3 - 2, y, 2, CELL_H);
 
+        // Floor range markers (small dots)
+        if (inRange) {
+          ctx.fillStyle = elev.color;
+          ctx.globalAlpha = 0.5;
+          ctx.fillRect(x + CELL_W * 1.5 - 2, y + CELL_H - 6, 4, 4);
+          ctx.globalAlpha = 1;
+        }
+
         // Elevator car
         if (elevFloor[ei] === f) {
+          // Car background with elevator color tint
           ctx.fillStyle = COLORS.elevatorCar;
           ctx.fillRect(x + 2, y + 4, CELL_W * 3 - 4, CELL_H - 8);
+
+          // Color accent on car
+          ctx.fillStyle = elev.color;
+          ctx.globalAlpha = 0.4;
+          ctx.fillRect(x + 2, y + 4, CELL_W * 3 - 4, 4);
+          ctx.globalAlpha = 1;
 
           // Player in elevator
           if (inElev === ei) {
@@ -591,6 +712,7 @@ export default function App() {
       {s.mode === GAME.PLAY && (
         <>
           <div className="hud">
+            <span className="hud-item hud-level">LV{s.currentLevel}</span>
             <span className="hud-item hud-score">🎯 {String(s.score).padStart(5, '0')}</span>
             <span className="hud-item hud-lives">{'❤️'.repeat(s.lives)}{'🖤'.repeat(3 - s.lives)}</span>
             <span className="hud-item hud-docs">📁 {collected}/{s.docs.length}</span>
@@ -617,10 +739,20 @@ export default function App() {
         </div>
       )}
 
+      {s.mode === GAME.LEVEL_COMPLETE && (
+        <div className="game-over-screen level-complete">
+          <h1>🎊 LEVEL {s.currentLevel} COMPLETE! 🎊</h1>
+          <p className="score">🏆 Score: {s.score}</p>
+          <p className="level-info">📁 Documents: {s.docs.length} collected</p>
+          <p className="restart-prompt">[ ➡️ PRESS SPACE FOR LEVEL {s.currentLevel + 1} ]</p>
+        </div>
+      )}
+
       {(s.mode === GAME.OVER || s.mode === GAME.WIN) && (
         <div className={`game-over-screen ${s.mode === GAME.WIN ? 'win' : 'lose'}`}>
-          <h1>{s.mode === GAME.WIN ? '🎉 MISSION COMPLETE! 🎉' : '💀 GAME OVER 💀'}</h1>
-          <p className="score">🏆 Score: {s.score}</p>
+          <h1>{s.mode === GAME.WIN ? '🎉 ALL LEVELS COMPLETE! 🎉' : '💀 GAME OVER 💀'}</h1>
+          <p className="score">🏆 Final Score: {s.score}</p>
+          {s.mode === GAME.WIN && <p className="level-info">🏅 Cleared all {LEVELS.length} levels!</p>}
           <p className="restart-prompt">[ 🔄 PRESS SPACE TO RESTART ]</p>
         </div>
       )}

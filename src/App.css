@@ -144,6 +144,18 @@
   animation: blink 1s infinite;
 }
 
+.game-over-screen.level-complete h1 {
+  color: #ff66ff;
+  text-shadow: 0 0 30px #ff66ff, 0 0 60px #ff66ff;
+}
+
+.game-over-screen .level-info {
+  color: #4488ff;
+  font-size: clamp(1.2rem, 3vw, 2rem);
+  margin-bottom: 1rem;
+  text-shadow: 0 0 10px #4488ff;
+}
+
 /* HUD styling */
 .hud {
   position: absolute;
@@ -164,6 +176,7 @@
   border-radius: 4px;
 }
 
+.hud-level { color: #ff66ff; font-weight: bold; }
 .hud-score { color: #ffaa00; }
 .hud-lives { color: #ff4444; }
 .hud-docs { color: #00ff00; }

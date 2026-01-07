@@ -164,6 +164,37 @@ export const sfx = {
     try {
       getNextSynth().triggerAttackRelease('G5', '8n');
     } catch (e) { /* ignore timing errors */ }
+  },
+
+  levelComplete: () => {
+    if (!isStarted) return;
+    const melody = [
+      { note: 'C5', delay: 0 },
+      { note: 'E5', delay: 100 },
+      { note: 'G5', delay: 200 },
+      { note: 'C6', delay: 300 },
+      { note: 'G5', delay: 400 },
+      { note: 'C6', delay: 500 },
+    ];
+    melody.forEach(({ note, delay }) => {
+      setTimeout(() => {
+        try {
+          getNextSynth().triggerAttackRelease(note, '8n');
+        } catch (e) { /* ignore */ }
+      }, delay);
+    });
+  },
+
+  elevatorDenied: () => {
+    if (!isStarted) return;
+    try {
+      pulseSynths[0].triggerAttackRelease('C2', '16n');
+      setTimeout(() => {
+        try {
+          pulseSynths[1].triggerAttackRelease('B1', '16n');
+        } catch (e) { /* ignore */ }
+      }, 80);
+    } catch (e) { /* ignore timing errors */ }
   }
 };
 
