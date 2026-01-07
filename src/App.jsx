@@ -1,0 +1,496 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import './App.css';
+
+// ═══════════════════════════════════════════════════════════════
+//  ELEVATOR ACTION - Web Edition
+// ═══════════════════════════════════════════════════════════════
+
+const FLOORS = 10;
+const WIDTH = 50;
+const BASE_CELL_W = 16;
+const BASE_CELL_H = 32;
+const ASPECT_RATIO = (WIDTH * BASE_CELL_W) / (FLOORS * BASE_CELL_H);
+
+const GAME = { TITLE: 0, PLAY: 1, OVER: 2, WIN: 3 };
+
+const COLORS = {
+  bg: '#0a0a0a',
+  floor: '#1a1a1a',
+  floorLine: '#333333',
+  player: '#00ff00',
+  playerDuck: '#00cc00',
+  enemy: '#ff4444',
+  elevator: '#444444',
+  elevatorCar: '#666666',
+  elevatorShaft: '#222222',
+  redDoor: '#ff6600',
+  redDoorCollected: '#332200',
+  blueDoor: '#4488ff',
+  bulletPlayer: '#00ff00',
+  bulletEnemy: '#ff0000',
+  text: '#00ff00',
+};
+
+const createLevel = () => ({
+  redDoors: [
+    { floor: 1, x: 8 }, { floor: 2, x: 25 }, { floor: 3, x: 40 },
+    { floor: 4, x: 12 }, { floor: 5, x: 35 }, { floor: 6, x: 8 },
+    { floor: 7, x: 42 }, { floor: 8, x: 20 }
+  ],
+  blueDoors: [
+    { floor: 2, x: 10 }, { floor: 3, x: 30 }, { floor: 5, x: 15 },
+    { floor: 6, x: 38 }, { floor: 8, x: 8 }
+  ],
+  elevatorX: [18, 32],
+  exitX: 44 // Exit door position on floor 0
+});
+
+const initState = () => {
+  const level = createLevel();
+  return {
+    mode: GAME.TITLE,
+    px: 25, pf: 9, pdir: 1, duck: false, inElev: -1,
+    elevFloor: [9, 0],
+    enemies: [],
+    bullets: [],
+    docs: level.redDoors.map(() => false),
+    score: 0, lives: 3, tick: 0,
+    level
+  };
+};
+
+// Calculate canvas size to fill screen
+const getCanvasSize = () => {
+  const padding = 40;
+  const maxW = window.innerWidth - padding;
+  const maxH = window.innerHeight - padding;
+
+  let w, h;
+  if (maxW / maxH > ASPECT_RATIO) {
+    h = maxH;
+    w = h * ASPECT_RATIO;
+  } else {
+    w = maxW;
+    h = w / ASPECT_RATIO;
+  }
+
+  return {
+    width: Math.floor(w),
+    height: Math.floor(h),
+    cellW: Math.floor(w) / WIDTH,
+    cellH: Math.floor(h) / FLOORS
+  };
+};
+
+export default function App() {
+  const canvasRef = useRef(null);
+  const stateRef = useRef(initState());
+  const keysRef = useRef(new Set());
+  const lastTickRef = useRef(0);
+  const [canvasSize, setCanvasSize] = useState(getCanvasSize);
+  const [, forceUpdate] = useState(0);
+
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => setCanvasSize(getCanvasSize());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const getState = () => stateRef.current;
+  const setState = (updater) => {
+    stateRef.current = typeof updater === 'function'
+      ? updater(stateRef.current)
+      : { ...stateRef.current, ...updater };
+    forceUpdate(n => n + 1);
+  };
+
+  // Keyboard handling
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyE', 'KeyD', 'Escape'].includes(e.code)) {
+        e.preventDefault();
+        keysRef.current.add(e.code);
+      }
+    };
+    const handleKeyUp = (e) => {
+      keysRef.current.delete(e.code);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Process input - only one-shot actions (not movement)
+  const processInput = useCallback(() => {
+    const s = getState();
+    const keys = keysRef.current;
+
+    if (s.mode === GAME.TITLE && keys.has('Space')) {
+      keys.delete('Space');
+      setState({ mode: GAME.PLAY });
+      return;
+    }
+
+    if ((s.mode === GAME.OVER || s.mode === GAME.WIN) && keys.has('Space')) {
+      keys.delete('Space');
+      stateRef.current = initState();
+      setState({ mode: GAME.PLAY });
+      return;
+    }
+
+    if (s.mode !== GAME.PLAY) return;
+
+    const { level, elevFloor } = s;
+    const n = { ...s };
+
+    // Exit elevator (one-shot)
+    if (s.inElev >= 0 && keys.has('KeyE')) {
+      keys.delete('KeyE');
+      n.inElev = -1;
+      n.px = level.elevatorX[s.inElev] + 4;
+      setState(n);
+      return;
+    }
+
+    // Duck toggle (one-shot)
+    if (keys.has('KeyD')) {
+      keys.delete('KeyD');
+      n.duck = !s.duck;
+    }
+
+    // Shoot (one-shot)
+    if (keys.has('Space') && !s.duck && s.inElev < 0) {
+      keys.delete('Space');
+      n.bullets = [...s.bullets, { x: s.px, floor: s.pf, dir: s.pdir, enemy: false }];
+    }
+
+    // Enter elevator (one-shot)
+    if (keys.has('KeyE') && s.inElev < 0) {
+      keys.delete('KeyE');
+      const ei = level.elevatorX.findIndex((ex, i) => elevFloor[i] === s.pf && Math.abs(ex - s.px) < 5);
+      if (ei >= 0) {
+        n.inElev = ei;
+        n.px = level.elevatorX[ei] + 1;
+      }
+    }
+
+    setState(n);
+  }, []);
+
+  // Game tick (physics, AI, collisions, movement)
+  const gameTick = useCallback(() => {
+    const s = getState();
+    if (s.mode !== GAME.PLAY) return;
+
+    const keys = keysRef.current;
+    const { level, elevFloor } = s;
+    const n = { ...s, tick: s.tick + 1 };
+
+    // Elevator movement (throttled)
+    if (s.inElev >= 0) {
+      const ef = elevFloor[s.inElev];
+      if (keys.has('ArrowUp') && ef > 0) {
+        n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f - 1 : f);
+        n.pf = ef - 1;
+      }
+      if (keys.has('ArrowDown') && ef < FLOORS - 1) {
+        n.elevFloor = elevFloor.map((f, i) => i === s.inElev ? f + 1 : f);
+        n.pf = ef + 1;
+      }
+    } else {
+      // Walking (throttled)
+      if (keys.has('ArrowLeft') && !s.duck) {
+        n.px = Math.max(2, s.px - 2);
+        n.pdir = -1;
+      }
+      if (keys.has('ArrowRight') && !s.duck) {
+        n.px = Math.min(WIDTH - 2, s.px + 2);
+        n.pdir = 1;
+      }
+
+      // Collect docs
+      level.redDoors.forEach((d, i) => {
+        if (!n.docs[i] && d.floor === n.pf && Math.abs(d.x - n.px) < 3) {
+          n.docs = n.docs.map((v, j) => j === i ? true : v);
+          n.score += 500;
+        }
+      });
+    }
+
+    // Move bullets
+    n.bullets = s.bullets
+      .map(b => ({ ...b, x: b.x + b.dir * 2 }))
+      .filter(b => b.x > 0 && b.x < WIDTH);
+
+    // Bullet hits
+    n.bullets = n.bullets.filter(b => {
+      if (!b.enemy) {
+        const hit = n.enemies.findIndex(e => e.floor === b.floor && Math.abs(e.x - b.x) < 2);
+        if (hit >= 0) {
+          n.enemies = n.enemies.filter((_, i) => i !== hit);
+          n.score += 100;
+          return false;
+        }
+      } else if (b.floor === s.pf && Math.abs(b.x - s.px) < 2 && !s.duck && s.inElev < 0) {
+        n.lives = s.lives - 1;
+        if (n.lives <= 0) n.mode = GAME.OVER;
+        return false;
+      }
+      return true;
+    });
+
+    // Enemy AI
+    n.enemies = s.enemies.map(e => {
+      const ne = { ...e };
+      if (e.floor === s.pf) {
+        ne.dir = s.px > e.x ? 1 : -1;
+        if (Math.random() < 0.02) {
+          n.bullets.push({ x: e.x, floor: e.floor, dir: ne.dir, enemy: true });
+        }
+      }
+      if (Math.random() < 0.2) {
+        ne.x = Math.max(2, Math.min(WIDTH - 2, ne.x + ne.dir * 0.5));
+      }
+      return ne;
+    });
+
+    // Spawn enemies
+    if (Math.random() < 0.01 && n.enemies.length < 4) {
+      const bd = s.level.blueDoors[Math.floor(Math.random() * s.level.blueDoors.length)];
+      n.enemies.push({ x: bd.x, floor: bd.floor, dir: Math.random() > 0.5 ? 1 : -1 });
+    }
+
+    // Win check - must reach exit door on floor 0
+    if (n.docs.every(d => d) && s.pf === 0 && Math.abs(n.px - level.exitX) < 4) {
+      n.mode = GAME.WIN;
+      n.score += 5000;
+    }
+
+    setState(n);
+  }, []);
+
+  // Render to canvas
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const s = getState();
+    const { level, px, pf, pdir, duck, inElev, elevFloor, enemies, bullets, docs } = s;
+    const { width: CANVAS_W, height: CANVAS_H, cellW: CELL_W, cellH: CELL_H } = canvasSize;
+
+    // Clear
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // Draw floors
+    for (let f = 0; f < FLOORS; f++) {
+      const y = f * CELL_H;
+
+      // Floor background
+      ctx.fillStyle = COLORS.floor;
+      ctx.fillRect(0, y, CANVAS_W, CELL_H);
+
+      // Floor line at bottom
+      ctx.fillStyle = COLORS.floorLine;
+      ctx.fillRect(0, y + CELL_H - 2, CANVAS_W, 2);
+    }
+
+    // Draw elevator shafts
+    level.elevatorX.forEach((ex, ei) => {
+      for (let f = 0; f < FLOORS; f++) {
+        const x = ex * CELL_W;
+        const y = f * CELL_H;
+
+        // Shaft
+        ctx.fillStyle = COLORS.elevatorShaft;
+        ctx.fillRect(x, y, CELL_W * 3, CELL_H);
+
+        // Shaft lines
+        ctx.fillStyle = COLORS.elevator;
+        ctx.fillRect(x, y, 2, CELL_H);
+        ctx.fillRect(x + CELL_W * 3 - 2, y, 2, CELL_H);
+
+        // Elevator car
+        if (elevFloor[ei] === f) {
+          ctx.fillStyle = COLORS.elevatorCar;
+          ctx.fillRect(x + 2, y + 4, CELL_W * 3 - 4, CELL_H - 8);
+
+          // Player in elevator
+          if (inElev === ei) {
+            ctx.fillStyle = COLORS.player;
+            ctx.fillRect(x + CELL_W, y + 8, CELL_W, CELL_H - 16);
+          }
+        }
+      }
+    });
+
+    // Draw red doors (documents)
+    level.redDoors.forEach((d, i) => {
+      const x = d.x * CELL_W;
+      const y = d.floor * CELL_H;
+      ctx.fillStyle = docs[i] ? COLORS.redDoorCollected : COLORS.redDoor;
+      ctx.fillRect(x, y + 4, CELL_W * 2, CELL_H - 8);
+
+      // Door frame
+      if (!docs[i]) {
+        ctx.strokeStyle = '#ff8800';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 5, CELL_W * 2 - 2, CELL_H - 10);
+      }
+    });
+
+    // Draw blue doors (spawn points)
+    level.blueDoors.forEach(d => {
+      const x = d.x * CELL_W;
+      const y = d.floor * CELL_H;
+      ctx.fillStyle = COLORS.blueDoor;
+      ctx.fillRect(x, y + 4, CELL_W * 2, CELL_H - 8);
+    });
+
+    // Draw exit door on floor 0
+    const allDocsCollected = docs.every(d => d);
+    const exitX = level.exitX * CELL_W;
+    const exitY = 0; // Floor 0
+
+    // Pulsing effect when all docs collected
+    if (allDocsCollected) {
+      const pulse = Math.sin(Date.now() / 150) * 0.3 + 0.7;
+      ctx.fillStyle = `rgba(0, 255, 0, ${pulse})`;
+      ctx.fillRect(exitX - 4, exitY, CELL_W * 2 + 8, CELL_H);
+    }
+
+    ctx.fillStyle = allDocsCollected ? '#00ff00' : '#336633';
+    ctx.fillRect(exitX, exitY + 4, CELL_W * 2, CELL_H - 8);
+
+    // EXIT text
+    ctx.fillStyle = allDocsCollected ? '#000000' : '#224422';
+    ctx.font = `bold ${Math.max(10, CELL_H / 3)}px monospace`;
+    ctx.fillText('EXIT', exitX + 4, exitY + CELL_H / 2 + 4);
+
+    // Draw enemies
+    enemies.forEach(e => {
+      const x = e.x * CELL_W;
+      const y = e.floor * CELL_H;
+      ctx.fillStyle = COLORS.enemy;
+      ctx.fillRect(x - CELL_W / 2, y + 4, CELL_W, CELL_H - 8);
+
+      // Enemy direction indicator
+      ctx.fillStyle = '#ff6666';
+      const eyeX = e.dir > 0 ? x + 2 : x - 6;
+      ctx.fillRect(eyeX, y + 10, 4, 4);
+    });
+
+    // Draw player (if not in elevator)
+    if (inElev < 0) {
+      const x = px * CELL_W;
+      const y = pf * CELL_H;
+
+      if (duck) {
+        ctx.fillStyle = COLORS.playerDuck;
+        ctx.fillRect(x - CELL_W / 2, y + CELL_H - 12, CELL_W, 8);
+      } else {
+        ctx.fillStyle = COLORS.player;
+        ctx.fillRect(x - CELL_W / 2, y + 4, CELL_W, CELL_H - 8);
+
+        // Direction indicator
+        ctx.fillStyle = '#00ff88';
+        const eyeX = pdir > 0 ? x + 2 : x - 6;
+        ctx.fillRect(eyeX, y + 10, 4, 4);
+      }
+    }
+
+    // Draw bullets
+    bullets.forEach(b => {
+      const x = b.x * CELL_W;
+      const y = b.floor * CELL_H + CELL_H / 2;
+      ctx.fillStyle = b.enemy ? COLORS.bulletEnemy : COLORS.bulletPlayer;
+      ctx.fillRect(x - 4, y - 2, 8, 4);
+
+      // Bullet trail
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(x - b.dir * 8 - 4, y - 1, 6, 2);
+      ctx.globalAlpha = 1;
+    });
+
+  }, [canvasSize]);
+
+  // Main game loop
+  useEffect(() => {
+    let animationId;
+    const TICK_RATE = 100; // ms between game logic updates
+
+    const gameLoop = (timestamp) => {
+      // Process input every frame for responsiveness
+      processInput();
+
+      // Game logic at fixed rate
+      if (timestamp - lastTickRef.current >= TICK_RATE) {
+        gameTick();
+        lastTickRef.current = timestamp;
+      }
+
+      // Render every frame
+      render();
+
+      animationId = requestAnimationFrame(gameLoop);
+    };
+
+    animationId = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(animationId);
+  }, [processInput, gameTick, render]);
+
+  const s = getState();
+  const collected = s.docs.filter(d => d).length;
+
+  return (
+    <div className="game-container">
+      <canvas
+        ref={canvasRef}
+        width={canvasSize.width}
+        height={canvasSize.height}
+        className="game-canvas"
+      />
+      <div className="crt-overlay" />
+
+      {s.mode === GAME.PLAY && (
+        <>
+          <div className="hud">
+            <span className="hud-item hud-score">🎯 {String(s.score).padStart(5, '0')}</span>
+            <span className="hud-item hud-lives">{'❤️'.repeat(s.lives)}{'🖤'.repeat(3 - s.lives)}</span>
+            <span className="hud-item hud-docs">📁 {collected}/{s.docs.length}</span>
+            <span className="hud-item hud-floor">🏢 FL{FLOORS - s.pf}</span>
+          </div>
+          <div className="controls-hint">
+            ⬅️➡️ Move | ⬆️⬇️ Elevator | 🔑E Enter/Exit | 🔫SPACE Shoot | 🦆D Duck
+          </div>
+        </>
+      )}
+
+      {s.mode === GAME.TITLE && (
+        <div className="title-screen">
+          <h1>🛗 ELEVATOR</h1>
+          <h2>💥 ACTION 💥</h2>
+          <p className="instructions">
+            📁 Collect all documents and escape to the ground floor! 🚪
+          </p>
+          <p className="instructions">
+            ⬅️➡️ Move | ⬆️⬇️ Elevator | 🔑E Enter/Exit | 🔫SPACE Shoot | 🦆D Duck
+          </p>
+          <p className="start-prompt">[ 👆 PRESS SPACE TO START 👆 ]</p>
+        </div>
+      )}
+
+      {(s.mode === GAME.OVER || s.mode === GAME.WIN) && (
+        <div className={`game-over-screen ${s.mode === GAME.WIN ? 'win' : 'lose'}`}>
+          <h1>{s.mode === GAME.WIN ? '🎉 MISSION COMPLETE! 🎉' : '💀 GAME OVER 💀'}</h1>
+          <p className="score">🏆 Score: {s.score}</p>
+          <p className="restart-prompt">[ 🔄 PRESS SPACE TO RESTART ]</p>
+        </div>
+      )}
+    </div>
+  );
+}
