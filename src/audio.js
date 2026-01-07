@@ -1,7 +1,7 @@
 import * as Tone from 'tone';
 
 // ═══════════════════════════════════════════════════════════════
-//  NES-Style Chiptune Audio System
+//  NES-Style Chiptune Audio System (Fixed timing)
 // ═══════════════════════════════════════════════════════════════
 
 let isStarted = false;
@@ -11,109 +11,104 @@ export const startAudio = async () => {
   if (isStarted) return;
   await Tone.start();
   isStarted = true;
-  Tone.getDestination().volume.value = -10; // Lowered volume
+  Tone.getDestination().volume.value = -10;
 };
 
 // ─────────────────────────────────────────────────────────────────
-//  INSTRUMENTS (NES-style)
+//  INSTRUMENTS (NES-style) - Multiple instances to avoid conflicts
 // ─────────────────────────────────────────────────────────────────
 
-// Pulse wave synth for melody (NES Pulse Channel)
-const melodySynth = new Tone.Synth({
-  oscillator: { type: 'pulse', width: 0.25 },
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.1 }
-}).toDestination();
-melodySynth.volume.value = -8;
+// Create synth pool to avoid timing conflicts
+const createSynth = (type = 'square', volume = -8) => {
+  const synth = new Tone.Synth({
+    oscillator: { type },
+    envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
+  }).toDestination();
+  synth.volume.value = volume;
+  return synth;
+};
 
-// Pulse wave synth for harmony
-const harmonySynth = new Tone.Synth({
-  oscillator: { type: 'pulse', width: 0.5 },
-  envelope: { attack: 0.01, decay: 0.15, sustain: 0.3, release: 0.1 }
-}).toDestination();
-harmonySynth.volume.value = -12;
+const createPulseSynth = (width = 0.25, volume = -8) => {
+  const synth = new Tone.Synth({
+    oscillator: { type: 'pulse', width },
+    envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.1 }
+  }).toDestination();
+  synth.volume.value = volume;
+  return synth;
+};
 
-// Triangle wave synth for bass (NES Triangle Channel)
-const bassSynth = new Tone.Synth({
-  oscillator: { type: 'triangle' },
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 0.1 }
-}).toDestination();
-bassSynth.volume.value = -6;
+const createNoiseSynth = (volume = -12) => {
+  const synth = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
+  }).toDestination();
+  synth.volume.value = volume;
+  return synth;
+};
 
-// Noise synth for drums (NES Noise Channel)
-const noiseSynth = new Tone.NoiseSynth({
-  noise: { type: 'white' },
-  envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
-}).toDestination();
-noiseSynth.volume.value = -12;
+// SFX synth pool (multiple to avoid conflicts)
+const sfxSynths = [createSynth('square', -8), createSynth('square', -8), createSynth('square', -8)];
+const pulseSynths = [createPulseSynth(0.25, -8), createPulseSynth(0.5, -10)];
+const noiseSynths = [createNoiseSynth(-12), createNoiseSynth(-12)];
+const bassSynth = createSynth('triangle', -6);
 
-// SFX synths
-const sfxSynth = new Tone.Synth({
-  oscillator: { type: 'square' },
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
-}).toDestination();
-sfxSynth.volume.value = -8;
+let synthIndex = 0;
+const getNextSynth = () => {
+  synthIndex = (synthIndex + 1) % sfxSynths.length;
+  return sfxSynths[synthIndex];
+};
 
-// Additional SFX synth for layering
-const sfxSynth2 = new Tone.Synth({
-  oscillator: { type: 'pulse', width: 0.5 },
-  envelope: { attack: 0.005, decay: 0.05, sustain: 0.1, release: 0.05 }
-}).toDestination();
-sfxSynth2.volume.value = -10;
-
-// Victory music synths
-const victorySynth = new Tone.Synth({
-  oscillator: { type: 'pulse', width: 0.25 },
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.2 }
-}).toDestination();
-victorySynth.volume.value = -6;
-
-const victoryBassSynth = new Tone.Synth({
-  oscillator: { type: 'triangle' },
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.1 }
-}).toDestination();
-victoryBassSynth.volume.value = -8;
+let noiseIndex = 0;
+const getNextNoise = () => {
+  noiseIndex = (noiseIndex + 1) % noiseSynths.length;
+  return noiseSynths[noiseIndex];
+};
 
 // ─────────────────────────────────────────────────────────────────
-//  SOUND EFFECTS
+//  SOUND EFFECTS (simplified to avoid timing issues)
 // ─────────────────────────────────────────────────────────────────
 
 export const sfx = {
   shoot: () => {
     if (!isStarted) return;
-    sfxSynth.triggerAttackRelease('C6', '32n');
-    setTimeout(() => sfxSynth.triggerAttackRelease('G5', '32n'), 30);
+    try {
+      getNextSynth().triggerAttackRelease('C6', '32n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   enemyHit: () => {
     if (!isStarted) return;
-    sfxSynth.triggerAttackRelease('E3', '16n');
-    setTimeout(() => sfxSynth.triggerAttackRelease('C3', '16n'), 50);
-    setTimeout(() => noiseSynth.triggerAttackRelease('16n'), 80);
+    try {
+      getNextSynth().triggerAttackRelease('C3', '16n');
+      getNextNoise().triggerAttackRelease('8n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   collectDoc: () => {
     if (!isStarted) return;
-    const now = Tone.now();
-    sfxSynth.triggerAttackRelease('E5', '32n', now);
-    sfxSynth.triggerAttackRelease('G5', '32n', now + 0.06);
-    sfxSynth.triggerAttackRelease('C6', '32n', now + 0.12);
-    sfxSynth.triggerAttackRelease('E6', '16n', now + 0.18);
+    try {
+      const synth = getNextSynth();
+      synth.triggerAttackRelease('E5', '16n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   playerHit: () => {
     if (!isStarted) return;
-    noiseSynth.triggerAttackRelease('8n');
-    sfxSynth.triggerAttackRelease('C2', '8n');
+    try {
+      getNextNoise().triggerAttackRelease('8n');
+      getNextSynth().triggerAttackRelease('C2', '8n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   elevator: () => {
     if (!isStarted) return;
-    sfxSynth.triggerAttackRelease('G3', '32n');
+    try {
+      getNextSynth().triggerAttackRelease('G3', '32n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   win: () => {
     if (!isStarted) return;
-    // Trigger victory music
     playVictoryMusic();
   },
 
@@ -124,281 +119,152 @@ export const sfx = {
 
   start: () => {
     if (!isStarted) return;
-    const now = Tone.now();
-    sfxSynth.triggerAttackRelease('C4', '16n', now);
-    sfxSynth.triggerAttackRelease('E4', '16n', now + 0.1);
-    sfxSynth.triggerAttackRelease('G4', '16n', now + 0.2);
-    sfxSynth.triggerAttackRelease('C5', '8n', now + 0.3);
+    try {
+      getNextSynth().triggerAttackRelease('C5', '8n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
-  // New sound effects
   footstep: () => {
     if (!isStarted) return;
-    noiseSynth.triggerAttackRelease('64n');
+    try {
+      getNextNoise().triggerAttackRelease('64n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   duck: () => {
     if (!isStarted) return;
-    sfxSynth2.triggerAttackRelease('G2', '32n');
-    setTimeout(() => sfxSynth2.triggerAttackRelease('E2', '32n'), 40);
+    try {
+      getNextSynth().triggerAttackRelease('G2', '32n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   unduck: () => {
     if (!isStarted) return;
-    sfxSynth2.triggerAttackRelease('E2', '32n');
-    setTimeout(() => sfxSynth2.triggerAttackRelease('G2', '32n'), 40);
+    try {
+      getNextSynth().triggerAttackRelease('E3', '32n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   enemySpawn: () => {
     if (!isStarted) return;
-    const now = Tone.now();
-    sfxSynth2.triggerAttackRelease('C3', '32n', now);
-    sfxSynth2.triggerAttackRelease('E3', '32n', now + 0.05);
-    sfxSynth2.triggerAttackRelease('G3', '32n', now + 0.1);
+    try {
+      pulseSynths[0].triggerAttackRelease('C3', '16n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   enemyShoot: () => {
     if (!isStarted) return;
-    sfxSynth2.triggerAttackRelease('A5', '32n');
-    setTimeout(() => sfxSynth2.triggerAttackRelease('F5', '32n'), 25);
-  },
-
-  doorOpen: () => {
-    if (!isStarted) return;
-    const now = Tone.now();
-    sfxSynth2.triggerAttackRelease('C4', '32n', now);
-    sfxSynth2.triggerAttackRelease('E4', '32n', now + 0.03);
+    try {
+      pulseSynths[1].triggerAttackRelease('A5', '32n');
+    } catch (e) { /* ignore timing errors */ }
   },
 
   allDocsCollected: () => {
     if (!isStarted) return;
-    const now = Tone.now();
-    // Triumphant fanfare
-    sfxSynth.triggerAttackRelease('G4', '16n', now);
-    sfxSynth.triggerAttackRelease('C5', '16n', now + 0.1);
-    sfxSynth.triggerAttackRelease('E5', '16n', now + 0.2);
-    sfxSynth.triggerAttackRelease('G5', '8n', now + 0.3);
-    sfxSynth2.triggerAttackRelease('C4', '4n', now);
+    try {
+      getNextSynth().triggerAttackRelease('G5', '8n');
+    } catch (e) { /* ignore timing errors */ }
   }
 };
 
 // ─────────────────────────────────────────────────────────────────
-//  VICTORY MUSIC
+//  VICTORY MUSIC (using setTimeout for safety)
 // ─────────────────────────────────────────────────────────────────
 
 const playVictoryMusic = () => {
-  const now = Tone.now();
-
-  // Victory melody - triumphant fanfare
-  const melodyNotes = [
-    { note: 'C5', time: 0, duration: '8n' },
-    { note: 'E5', time: 0.15, duration: '8n' },
-    { note: 'G5', time: 0.3, duration: '8n' },
-    { note: 'C6', time: 0.45, duration: '4n' },
-    { note: 'G5', time: 0.75, duration: '8n' },
-    { note: 'C6', time: 0.9, duration: '4n' },
-    // Second phrase
-    { note: 'E6', time: 1.3, duration: '8n' },
-    { note: 'D6', time: 1.45, duration: '8n' },
-    { note: 'C6', time: 1.6, duration: '8n' },
-    { note: 'E6', time: 1.75, duration: '4n' },
-    { note: 'D6', time: 2.05, duration: '8n' },
-    { note: 'E6', time: 2.2, duration: '4n' },
-    // Final phrase - big finish
-    { note: 'G5', time: 2.6, duration: '8n' },
-    { note: 'A5', time: 2.75, duration: '8n' },
-    { note: 'B5', time: 2.9, duration: '8n' },
-    { note: 'C6', time: 3.05, duration: '8n' },
-    { note: 'D6', time: 3.2, duration: '8n' },
-    { note: 'E6', time: 3.35, duration: '8n' },
-    { note: 'F6', time: 3.5, duration: '8n' },
-    { note: 'G6', time: 3.65, duration: '2n' },
+  const melody = [
+    { note: 'C5', delay: 0 },
+    { note: 'E5', delay: 150 },
+    { note: 'G5', delay: 300 },
+    { note: 'C6', delay: 450 },
+    { note: 'E6', delay: 600 },
+    { note: 'G6', delay: 750 },
+    { note: 'C7', delay: 900 },
   ];
 
-  // Bass notes
-  const bassNotes = [
-    { note: 'C3', time: 0, duration: '4n' },
-    { note: 'G3', time: 0.45, duration: '4n' },
-    { note: 'C3', time: 0.9, duration: '4n' },
-    { note: 'A2', time: 1.3, duration: '4n' },
-    { note: 'G2', time: 1.75, duration: '4n' },
-    { note: 'F2', time: 2.2, duration: '4n' },
-    { note: 'G2', time: 2.6, duration: '4n' },
-    { note: 'C3', time: 3.2, duration: '2n' },
-  ];
-
-  // Drums - celebratory pattern
-  const drumHits = [0, 0.15, 0.3, 0.45, 0.75, 0.9, 1.3, 1.45, 1.75, 2.05, 2.6, 2.75, 2.9, 3.05, 3.2, 3.35, 3.5, 3.65];
-
-  melodyNotes.forEach(({ note, time, duration }) => {
-    victorySynth.triggerAttackRelease(note, duration, now + time);
-  });
-
-  bassNotes.forEach(({ note, time, duration }) => {
-    victoryBassSynth.triggerAttackRelease(note, duration, now + time);
-  });
-
-  drumHits.forEach(time => {
-    noiseSynth.triggerAttackRelease('32n', now + time);
+  melody.forEach(({ note, delay }) => {
+    setTimeout(() => {
+      try {
+        getNextSynth().triggerAttackRelease(note, '8n');
+      } catch (e) { /* ignore */ }
+    }, delay);
   });
 };
-
-// ─────────────────────────────────────────────────────────────────
-//  GAME OVER MUSIC
-// ─────────────────────────────────────────────────────────────────
 
 const playGameOverMusic = () => {
-  const now = Tone.now();
-
-  // Sad descending melody
-  const melodyNotes = [
-    { note: 'E5', time: 0, duration: '4n' },
-    { note: 'D5', time: 0.4, duration: '4n' },
-    { note: 'C5', time: 0.8, duration: '4n' },
-    { note: 'B4', time: 1.2, duration: '4n' },
-    { note: 'A4', time: 1.6, duration: '4n' },
-    { note: 'G4', time: 2.0, duration: '4n' },
-    { note: 'F4', time: 2.4, duration: '4n' },
-    { note: 'E4', time: 2.8, duration: '2n' },
+  const melody = [
+    { note: 'E4', delay: 0 },
+    { note: 'D4', delay: 300 },
+    { note: 'C4', delay: 600 },
+    { note: 'B3', delay: 900 },
   ];
 
-  // Bass - minor feel
-  const bassNotes = [
-    { note: 'A2', time: 0, duration: '2n' },
-    { note: 'E2', time: 0.8, duration: '2n' },
-    { note: 'F2', time: 1.6, duration: '2n' },
-    { note: 'E2', time: 2.4, duration: '1n' },
-  ];
-
-  melodyNotes.forEach(({ note, time, duration }) => {
-    sfxSynth.triggerAttackRelease(note, duration, now + time);
-  });
-
-  bassNotes.forEach(({ note, time, duration }) => {
-    victoryBassSynth.triggerAttackRelease(note, duration, now + time);
+  melody.forEach(({ note, delay }) => {
+    setTimeout(() => {
+      try {
+        getNextSynth().triggerAttackRelease(note, '4n');
+      } catch (e) { /* ignore */ }
+    }, delay);
   });
 };
 
 // ─────────────────────────────────────────────────────────────────
-//  BACKGROUND MUSIC
+//  BACKGROUND MUSIC (simplified and safer)
 // ─────────────────────────────────────────────────────────────────
 
-// Main theme melody (Elevator Action inspired)
-const melodyPattern = [
-  // Bar 1
-  { note: 'E4', duration: '8n', time: '0:0:0' },
-  { note: 'G4', duration: '8n', time: '0:0:2' },
-  { note: 'A4', duration: '8n', time: '0:1:0' },
-  { note: 'B4', duration: '8n', time: '0:1:2' },
-  { note: 'C5', duration: '4n', time: '0:2:0' },
-  { note: 'B4', duration: '8n', time: '0:3:0' },
-  { note: 'A4', duration: '8n', time: '0:3:2' },
-  // Bar 2
-  { note: 'G4', duration: '8n', time: '1:0:0' },
-  { note: 'E4', duration: '8n', time: '1:0:2' },
-  { note: 'D4', duration: '4n', time: '1:1:0' },
-  { note: 'E4', duration: '4n', time: '1:2:0' },
-  { note: 'G4', duration: '4n', time: '1:3:0' },
-  // Bar 3
-  { note: 'A4', duration: '8n', time: '2:0:0' },
-  { note: 'B4', duration: '8n', time: '2:0:2' },
-  { note: 'C5', duration: '8n', time: '2:1:0' },
-  { note: 'D5', duration: '8n', time: '2:1:2' },
-  { note: 'E5', duration: '4n', time: '2:2:0' },
-  { note: 'D5', duration: '8n', time: '2:3:0' },
-  { note: 'C5', duration: '8n', time: '2:3:2' },
-  // Bar 4
-  { note: 'B4', duration: '8n', time: '3:0:0' },
-  { note: 'A4', duration: '8n', time: '3:0:2' },
-  { note: 'G4', duration: '4n', time: '3:1:0' },
-  { note: 'E4', duration: '2n', time: '3:2:0' },
-];
+// Music synths (separate from SFX)
+const melodySynth = createPulseSynth(0.25, -10);
+const harmSynth = createPulseSynth(0.5, -14);
+const musicBassSynth = createSynth('triangle', -8);
 
-// Harmony pattern
-const harmonyPattern = [
-  { note: 'C4', duration: '2n', time: '0:0:0' },
-  { note: 'G3', duration: '2n', time: '0:2:0' },
-  { note: 'A3', duration: '2n', time: '1:0:0' },
-  { note: 'E4', duration: '2n', time: '1:2:0' },
-  { note: 'F4', duration: '2n', time: '2:0:0' },
-  { note: 'G4', duration: '2n', time: '2:2:0' },
-  { note: 'E4', duration: '2n', time: '3:0:0' },
-  { note: 'C4', duration: '2n', time: '3:2:0' },
-];
-
-// Bass line
-const bassPattern = [
-  { note: 'C2', duration: '4n', time: '0:0:0' },
-  { note: 'C2', duration: '4n', time: '0:1:0' },
-  { note: 'G2', duration: '4n', time: '0:2:0' },
-  { note: 'G2', duration: '4n', time: '0:3:0' },
-  { note: 'A2', duration: '4n', time: '1:0:0' },
-  { note: 'A2', duration: '4n', time: '1:1:0' },
-  { note: 'E2', duration: '4n', time: '1:2:0' },
-  { note: 'E2', duration: '4n', time: '1:3:0' },
-  { note: 'F2', duration: '4n', time: '2:0:0' },
-  { note: 'F2', duration: '4n', time: '2:1:0' },
-  { note: 'G2', duration: '4n', time: '2:2:0' },
-  { note: 'G2', duration: '4n', time: '2:3:0' },
-  { note: 'A2', duration: '4n', time: '3:0:0' },
-  { note: 'G2', duration: '4n', time: '3:1:0' },
-  { note: 'C2', duration: '2n', time: '3:2:0' },
-];
-
-// Drum pattern
-const drumPattern = [
-  { time: '0:0:0' }, { time: '0:1:0' }, { time: '0:2:0' }, { time: '0:3:0' },
-  { time: '1:0:0' }, { time: '1:1:0' }, { time: '1:2:0' }, { time: '1:3:0' },
-  { time: '2:0:0' }, { time: '2:1:0' }, { time: '2:2:0' }, { time: '2:3:0' },
-  { time: '3:0:0' }, { time: '3:1:0' }, { time: '3:2:0' }, { time: '3:3:0' },
-];
-
-let melodyPart, harmonyPart, bassPart, drumPart;
+let musicLoop = null;
 let musicPlaying = false;
+
+const melodyNotes = ['E4', 'G4', 'A4', 'B4', 'C5', 'B4', 'A4', 'G4', 'E4', 'D4', 'E4', 'G4'];
+const bassNotes = ['C2', 'G2', 'A2', 'E2', 'F2', 'G2', 'C2'];
 
 export const startMusic = () => {
   if (!isStarted || musicPlaying) return;
 
-  Tone.getTransport().bpm.value = 140;
+  let melodyIdx = 0;
+  let bassIdx = 0;
+  let beat = 0;
 
-  melodyPart = new Tone.Part((time, value) => {
-    melodySynth.triggerAttackRelease(value.note, value.duration, time);
-  }, melodyPattern).start(0);
-  melodyPart.loop = true;
-  melodyPart.loopEnd = '4:0:0';
+  musicLoop = setInterval(() => {
+    try {
+      // Melody every 2 beats
+      if (beat % 2 === 0) {
+        melodySynth.triggerAttackRelease(melodyNotes[melodyIdx % melodyNotes.length], '8n');
+        melodyIdx++;
+      }
 
-  harmonyPart = new Tone.Part((time, value) => {
-    harmonySynth.triggerAttackRelease(value.note, value.duration, time);
-  }, harmonyPattern).start(0);
-  harmonyPart.loop = true;
-  harmonyPart.loopEnd = '4:0:0';
+      // Bass every 4 beats
+      if (beat % 4 === 0) {
+        musicBassSynth.triggerAttackRelease(bassNotes[bassIdx % bassNotes.length], '4n');
+        bassIdx++;
+      }
 
-  bassPart = new Tone.Part((time, value) => {
-    bassSynth.triggerAttackRelease(value.note, value.duration, time);
-  }, bassPattern).start(0);
-  bassPart.loop = true;
-  bassPart.loopEnd = '4:0:0';
+      // Harmony every 8 beats
+      if (beat % 8 === 0) {
+        harmSynth.triggerAttackRelease('C4', '2n');
+      }
 
-  drumPart = new Tone.Part((time) => {
-    noiseSynth.triggerAttackRelease('32n', time);
-  }, drumPattern).start(0);
-  drumPart.loop = true;
-  drumPart.loopEnd = '4:0:0';
+      beat++;
+    } catch (e) {
+      // Ignore timing errors
+    }
+  }, 150); // 150ms per beat = 100 BPM
 
-  Tone.getTransport().start();
   musicPlaying = true;
 };
 
 export const stopMusic = () => {
   if (!musicPlaying) return;
 
-  Tone.getTransport().stop();
-  Tone.getTransport().position = 0;
-
-  melodyPart?.dispose();
-  harmonyPart?.dispose();
-  bassPart?.dispose();
-  drumPart?.dispose();
+  if (musicLoop) {
+    clearInterval(musicLoop);
+    musicLoop = null;
+  }
 
   musicPlaying = false;
 };

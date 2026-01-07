@@ -34,16 +34,16 @@ const COLORS = {
 
 const createLevel = () => ({
   redDoors: [
-    { floor: 1, x: 8 }, { floor: 2, x: 25 }, { floor: 3, x: 40 },
-    { floor: 4, x: 12 }, { floor: 5, x: 35 }, { floor: 6, x: 8 },
-    { floor: 7, x: 42 }, { floor: 8, x: 20 }
+    { floor: 1, x: 25 }, { floor: 2, x: 10 }, { floor: 3, x: 40 },
+    { floor: 4, x: 12 }, { floor: 5, x: 35 }, { floor: 6, x: 25 },
+    { floor: 7, x: 42 }, { floor: 8, x: 10 }
   ],
   blueDoors: [
-    { floor: 2, x: 10 }, { floor: 3, x: 30 }, { floor: 5, x: 15 },
-    { floor: 6, x: 38 }, { floor: 8, x: 8 }
+    { floor: 2, x: 38 }, { floor: 3, x: 30 }, { floor: 5, x: 15 },
+    { floor: 6, x: 38 }, { floor: 8, x: 40 }
   ],
-  elevatorX: [18, 32],
-  exitX: 44 // Exit door position on floor 0
+  elevatorX: [15, 35],
+  exitX: 25 // Exit door position on floor 0 (center)
 });
 
 const initState = () => {
@@ -54,6 +54,7 @@ const initState = () => {
     elevFloor: [9, 0],
     enemies: [],
     bullets: [],
+    explosions: [], // Visual explosion effects
     docs: level.redDoors.map(() => false),
     score: 0, lives: 3, tick: 0,
     level
@@ -211,6 +212,11 @@ export default function App() {
     const { level, elevFloor } = s;
     const n = { ...s, tick: s.tick + 1 };
 
+    // Update explosions - fade out and remove dead ones
+    n.explosions = s.explosions
+      .map(exp => ({ ...exp, life: exp.life - 1 }))
+      .filter(exp => exp.life > 0);
+
     // Elevator movement (throttled)
     if (s.inElev >= 0) {
       const ef = elevFloor[s.inElev];
@@ -242,10 +248,10 @@ export default function App() {
         sfx.footstep();
       }
 
-      // Collect docs
+      // Collect docs - larger collection radius (5 units)
       const docsBeforeCount = n.docs.filter(d => d).length;
       level.redDoors.forEach((d, i) => {
-        if (!n.docs[i] && d.floor === n.pf && Math.abs(d.x - n.px) < 3) {
+        if (!n.docs[i] && d.floor === n.pf && Math.abs(d.x - n.px) < 5) {
           n.docs = n.docs.map((v, j) => j === i ? true : v);
           n.score += 500;
           sfx.collectDoc();
@@ -260,34 +266,59 @@ export default function App() {
 
     // Move bullets
     n.bullets = s.bullets
-      .map(b => ({ ...b, x: b.x + b.dir * 2 }))
+      .map(b => ({ ...b, x: b.x + b.dir * 3 })) // Faster bullets
       .filter(b => b.x > 0 && b.x < WIDTH);
 
-    // Bullet hits
+    // Copy enemies for hit detection
+    let enemiesHit = [];
+
+    // Bullet hits - check against current enemies with larger hit radius
     n.bullets = n.bullets.filter(b => {
       if (!b.enemy) {
-        const hit = n.enemies.findIndex(e => e.floor === b.floor && Math.abs(e.x - b.x) < 2);
-        if (hit >= 0) {
-          n.enemies = n.enemies.filter((_, i) => i !== hit);
+        // Player bullet hitting enemy - larger hit box (6 units)
+        const hitIdx = s.enemies.findIndex((e, idx) =>
+          !enemiesHit.includes(idx) &&
+          e.floor === b.floor &&
+          Math.abs(e.x - b.x) < 6
+        );
+        if (hitIdx >= 0) {
+          const hitEnemy = s.enemies[hitIdx];
+          enemiesHit.push(hitIdx);
           n.score += 100;
           sfx.enemyHit();
+          // Create explosion effect
+          n.explosions.push({
+            x: hitEnemy.x,
+            floor: hitEnemy.floor,
+            life: 10, // frames to live
+            particles: Array.from({ length: 8 }, () => ({
+              dx: (Math.random() - 0.5) * 4,
+              dy: (Math.random() - 0.5) * 4
+            }))
+          });
           return false;
         }
-      } else if (b.floor === s.pf && Math.abs(b.x - s.px) < 2 && !s.duck && s.inElev < 0) {
-        n.lives = s.lives - 1;
-        sfx.playerHit();
-        if (n.lives <= 0) {
-          n.mode = GAME.OVER;
-          stopMusic();
-          sfx.gameOver();
+      } else {
+        // Enemy bullet hitting player - check player position
+        if (b.floor === s.pf && Math.abs(b.x - s.px) < 4 && !s.duck && s.inElev < 0) {
+          n.lives = s.lives - 1;
+          sfx.playerHit();
+          if (n.lives <= 0) {
+            n.mode = GAME.OVER;
+            stopMusic();
+            sfx.gameOver();
+          }
+          return false;
         }
-        return false;
       }
       return true;
     });
 
-    // Enemy AI
-    n.enemies = s.enemies.map(e => {
+    // Remove hit enemies and apply AI to survivors
+    const survivingEnemies = s.enemies.filter((_, idx) => !enemiesHit.includes(idx));
+
+    // Enemy AI - only for surviving enemies
+    n.enemies = survivingEnemies.map(e => {
       const ne = { ...e };
       if (e.floor === s.pf) {
         ne.dir = s.px > e.x ? 1 : -1;
@@ -326,7 +357,7 @@ export default function App() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const s = getState();
-    const { level, px, pf, pdir, duck, inElev, elevFloor, enemies, bullets, docs } = s;
+    const { level, px, pf, pdir, duck, inElev, elevFloor, enemies, bullets, docs, explosions } = s;
     const { width: CANVAS_W, height: CANVAS_H, cellW: CELL_W, cellH: CELL_H } = canvasSize;
 
     // Clear
@@ -486,6 +517,34 @@ export default function App() {
       // Bullet trail
       ctx.globalAlpha = 0.5;
       ctx.fillRect(x - b.dir * 8 - 4, y - 1, 6, 2);
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw explosions
+    explosions.forEach(exp => {
+      const baseX = exp.x * CELL_W;
+      const baseY = exp.floor * CELL_H + CELL_H / 2;
+      const alpha = exp.life / 10;
+
+      // Draw explosion particles
+      exp.particles.forEach((p, i) => {
+        const px = baseX + p.dx * (10 - exp.life) * 2;
+        const py = baseY + p.dy * (10 - exp.life) * 2;
+        const size = Math.max(2, 8 * alpha);
+
+        // Colorful explosion
+        const colors = ['#ff0000', '#ff6600', '#ffff00', '#ff3300'];
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.globalAlpha = alpha;
+        ctx.fillRect(px - size / 2, py - size / 2, size, size);
+      });
+
+      // Center flash
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = alpha * 0.8;
+      const flashSize = 20 * alpha;
+      ctx.fillRect(baseX - flashSize / 2, baseY - flashSize / 2, flashSize, flashSize);
+
       ctx.globalAlpha = 1;
     });
 
